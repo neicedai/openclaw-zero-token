@@ -69,6 +69,13 @@ RUN for dir in /app/extensions /app/src/zero-token/extensions /app/.agent /app/.
       fi; \
     done
 
+# The first `pnpm install` runs before `COPY . .`, so workspace members under
+# `extensions/*` were missing (or only OPENCLAW_EXTENSIONS stubs existed).
+# Re-install so bundled-extension deps (e.g. openai, @opentelemetry/*) exist
+# before `pnpm build:docker` / tsdown.
+RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
+    NODE_OPTIONS=--max-old-space-size=2048 pnpm install --frozen-lockfile
+
 # A2UI bundle may fail under QEMU cross-compilation (e.g. building amd64
 # on Apple Silicon). CI builds natively per-arch so this is a no-op there.
 # Stub it so local cross-arch builds still succeed.
