@@ -17,8 +17,8 @@ const parentMessageMap = new Map<string, string>();
 export function resolveChatGPTWebSessionKey(context: {
   sessionId?: string;
   sessionKey?: string;
-}): string {
-  return context.sessionKey || context.sessionId || "default";
+}): string | null {
+  return context.sessionKey || context.sessionId || null;
 }
 
 export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
@@ -44,8 +44,8 @@ export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
 
         const sessionRef = context as unknown as { sessionId?: string; sessionKey?: string };
         const sessionKey = resolveChatGPTWebSessionKey(sessionRef);
-        let conversationId = conversationMap.get(sessionKey);
-        let parentMessageId = parentMessageMap.get(sessionKey);
+        let conversationId = sessionKey ? conversationMap.get(sessionKey) : undefined;
+        let parentMessageId = sessionKey ? parentMessageMap.get(sessionKey) : undefined;
 
         const messages = context.messages || [];
 
@@ -76,7 +76,7 @@ export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
         }
 
         console.log(
-          `[ChatGPTWebStream] Starting run for session: ${sessionKey} ` +
+          `[ChatGPTWebStream] Starting run for session: ${sessionKey || "ephemeral"} ` +
             `(sessionId=${sessionRef.sessionId || "n/a"})`,
         );
         console.log(`[ChatGPTWebStream] Conversation ID: ${conversationId || "new"}`);
@@ -305,10 +305,10 @@ export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
           try {
             const data = JSON.parse(dataStr);
 
-            if (data.conversation_id) {
+            if (sessionKey && data.conversation_id) {
               conversationMap.set(sessionKey, data.conversation_id);
             }
-            if (data.message?.id) {
+            if (sessionKey && data.message?.id) {
               parentMessageMap.set(sessionKey, data.message.id);
             }
 

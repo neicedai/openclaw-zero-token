@@ -15,7 +15,7 @@ describe("resolveChatGPTWebSessionKey", () => {
     expect(resolveChatGPTWebSessionKey({ sessionId: "sess-123" })).toBe("sess-123");
   });
 
-  it("uses default when both identifiers are absent", () => {
-    expect(resolveChatGPTWebSessionKey({})).toBe("default");
+  it("returns null when both identifiers are absent", () => {
+    expect(resolveChatGPTWebSessionKey({})).toBeNull();
   });
 });
