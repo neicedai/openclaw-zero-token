@@ -130,13 +130,14 @@ export function resolveSessionKey(params: {
   agentId: string;
   user?: string | undefined;
   prefix: string;
+  allowUserScopedSession?: boolean;
 }): string {
   const explicit = getHeader(params.req, "x-openclaw-session-key")?.trim();
   if (explicit) {
     return explicit;
   }
 
-  const user = params.user?.trim();
+  const user = params.allowUserScopedSession === false ? undefined : params.user?.trim();
   const mainKey = user ? `${params.prefix}-user:${user}` : `${params.prefix}:${randomUUID()}`;
   return buildAgentMainSessionKey({ agentId: params.agentId, mainKey });
 }
@@ -148,6 +149,7 @@ export function resolveGatewayRequestContext(params: {
   sessionPrefix: string;
   defaultMessageChannel: string;
   useMessageChannelHeader?: boolean;
+  allowUserScopedSession?: boolean;
 }): { agentId: string; sessionKey: string; messageChannel: string } {
   const agentId = resolveAgentIdForRequest({ req: params.req, model: params.model });
   const sessionKey = resolveSessionKey({
@@ -155,6 +157,7 @@ export function resolveGatewayRequestContext(params: {
     agentId,
     user: params.user,
     prefix: params.sessionPrefix,
+    allowUserScopedSession: params.allowUserScopedSession,
   });
 
   const messageChannel = params.useMessageChannelHeader

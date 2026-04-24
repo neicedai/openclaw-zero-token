@@ -442,6 +442,10 @@ export async function handleOpenAiHttpRequest(
     sessionPrefix: "openai",
     defaultMessageChannel: "webchat",
     useMessageChannelHeader: true,
+    // IDE clients already manage their own conversation history, so avoid
+    // pinning sessions together via the OpenAI `user` field unless the caller
+    // explicitly opts into reuse with `x-openclaw-session-key`.
+    allowUserScopedSession: false,
   });
   const { modelOverride, errorMessage: modelError } = await resolveOpenAiCompatModelOverride({
     req,

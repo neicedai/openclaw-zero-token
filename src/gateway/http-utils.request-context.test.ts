@@ -42,4 +42,18 @@ describe("resolveGatewayRequestContext", () => {
 
     expect(result.sessionKey).toContain("openresponses-user:alice");
   });
+
+  it("ignores user when user-scoped session reuse is disabled", () => {
+    const result = resolveGatewayRequestContext({
+      req: createReq(),
+      model: "openclaw",
+      user: "alice",
+      sessionPrefix: "openai",
+      defaultMessageChannel: "webchat",
+      allowUserScopedSession: false,
+    });
+
+    expect(result.sessionKey).not.toContain("alice");
+    expect(result.sessionKey).toContain("openai:");
+  });
 });

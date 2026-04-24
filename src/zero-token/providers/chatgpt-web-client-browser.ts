@@ -193,6 +193,15 @@ export class ChatGPTWebClientBrowser {
     await new Promise((r) => setTimeout(r, 2000));
   }
 
+  private async openFreshChatPage() {
+    const { browser } = await this.ensureBrowser();
+    const freshPage = await browser.newPage();
+    await freshPage.goto("https://chatgpt.com/", { waitUntil: "load" });
+    this.page = freshPage;
+    await this.ensureChatGptPageReady();
+    return freshPage;
+  }
+
   /**
    * DOM 模拟：通过真实浏览器交互发送消息，绕过 403 风控
    * 参考：zsodur/chatgpt-api-by-browser-script 等 DOM 模拟实现
@@ -200,8 +209,13 @@ export class ChatGPTWebClientBrowser {
   private async chatCompletionsViaDOM(params: {
     message: string;
     signal?: AbortSignal;
+    forceNewConversation?: boolean;
   }): Promise<ReadableStream<Uint8Array>> {
-    const { page } = await this.ensureBrowser();
+    let { page } = await this.ensureBrowser();
+    if (params.forceNewConversation) {
+      console.log("[ChatGPT Web Browser] DOM fallback starting a fresh chat page");
+      page = await this.openFreshChatPage();
+    }
 
     // Use Playwright native APIs for reliable input (same as Gemini/Grok/Perplexity)
     const inputSelectors = [
@@ -476,6 +490,7 @@ export class ChatGPTWebClientBrowser {
         return this.chatCompletionsViaDOM({
           message: params.message,
           signal: params.signal,
+          forceNewConversation: params.conversationId === "new",
         });
       }
       if (responseData.status === 401) {
