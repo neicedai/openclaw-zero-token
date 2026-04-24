@@ -25,6 +25,15 @@ const CHATGPT_WEB_PICKER_LABEL_PATTERNS = [
   "5.3",
   "5.5",
 ] as const;
+const CHATGPT_WEB_INTERACTIVE_SELECTOR = [
+  "button",
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  "[data-radix-collection-item]",
+  "[tabindex]",
+  "[aria-haspopup]",
+].join(", ");
 
 export interface ChatGPTWebClientOptions {
   accessToken: string;
@@ -211,7 +220,7 @@ export class ChatGPTWebClientBrowser {
   }
 
   private async readVisibleModelPickerTexts(page: Page) {
-    return await page.evaluate((patterns) => {
+    return await page.evaluate(({ patterns, selector }) => {
       const labels = patterns.map((p) => new RegExp(p, "i"));
       const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
       const isVisible = (el: Element) => {
@@ -230,9 +239,7 @@ export class ChatGPTWebClientBrowser {
 
       const seen = new Set<string>();
       const out: string[] = [];
-      const nodes = Array.from(
-        document.querySelectorAll('button, [role="button"], [role="menuitem"], [role="option"]'),
-      );
+      const nodes = Array.from(document.querySelectorAll(selector));
       for (const el of nodes) {
         if (!isVisible(el)) {
           continue;
@@ -257,11 +264,11 @@ export class ChatGPTWebClientBrowser {
         }
       }
       return out;
-    }, [...CHATGPT_WEB_PICKER_LABEL_PATTERNS]);
+    }, { patterns: [...CHATGPT_WEB_PICKER_LABEL_PATTERNS], selector: CHATGPT_WEB_INTERACTIVE_SELECTOR });
   }
 
   private async clickVisibleModelControl(page: Page, patterns: string[]) {
-    return await page.evaluate((matchers) => {
+    return await page.evaluate(({ matchers, selector }) => {
       const labels = matchers.map((p) => new RegExp(p, "i"));
       const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
       const isVisible = (el: Element) => {
@@ -278,11 +285,7 @@ export class ChatGPTWebClientBrowser {
         );
       };
 
-      const nodes = Array.from(
-        document.querySelectorAll(
-          'button, [role="button"], [role="menuitem"], [role="option"], [data-radix-collection-item]',
-        ),
-      );
+      const nodes = Array.from(document.querySelectorAll(selector));
       const match = nodes.find((el) => {
         if (!isVisible(el)) {
           return false;
@@ -290,7 +293,8 @@ export class ChatGPTWebClientBrowser {
         const text = normalize(el.textContent);
         const aria = normalize(el.getAttribute("aria-label"));
         const title = normalize(el.getAttribute("title"));
-        const combined = [text, aria, title].filter(Boolean).join(" | ");
+        const dataState = normalize(el.getAttribute("data-state"));
+        const combined = [text, aria, title, dataState].filter(Boolean).join(" | ");
         return combined && labels.some((rx) => rx.test(combined));
       });
       if (!match) {
@@ -298,7 +302,47 @@ export class ChatGPTWebClientBrowser {
       }
       (match as HTMLElement).click();
       return true;
-    }, patterns);
+    }, { matchers: patterns, selector: CHATGPT_WEB_INTERACTIVE_SELECTOR });
+  }
+
+  private async dumpVisibleInteractiveElements(page: Page) {
+    return await page.evaluate((selector) => {
+      const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const isVisible = (el: Element) => {
+        const node = el as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          style.opacity !== "0" &&
+          style.pointerEvents !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      const nodes = Array.from(document.querySelectorAll(selector));
+      return nodes
+        .filter((el) => isVisible(el))
+        .map((el) => {
+          const rect = (el as HTMLElement).getBoundingClientRect();
+          return {
+            tag: el.tagName.toLowerCase(),
+            role: normalize(el.getAttribute("role")),
+            text: normalize(el.textContent).slice(0, 80),
+            aria: normalize(el.getAttribute("aria-label")).slice(0, 80),
+            title: normalize(el.getAttribute("title")).slice(0, 80),
+            dataState: normalize(el.getAttribute("data-state")).slice(0, 40),
+            top: Math.round(rect.top),
+            left: Math.round(rect.left),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          };
+        })
+        .filter((entry) => entry.text || entry.aria || entry.title || entry.role)
+        .slice(0, 30);
+    }, CHATGPT_WEB_INTERACTIVE_SELECTOR);
   }
 
   private async ensureRequestedModelSelected(page: Page, requestedModel: string) {
@@ -328,6 +372,10 @@ export class ChatGPTWebClientBrowser {
       "5\\.5",
     ]);
     if (!opened) {
+      const visible = await this.dumpVisibleInteractiveElements(page);
+      console.warn(
+        `[ChatGPT Web Browser] Visible interactive elements snapshot: ${JSON.stringify(visible).slice(0, 4000)}`,
+      );
       console.warn("[ChatGPT Web Browser] Could not find a visible model picker control");
       return;
     }
