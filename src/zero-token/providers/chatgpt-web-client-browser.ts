@@ -460,6 +460,12 @@ export class ChatGPTWebClientBrowser {
 
     const locator = dialog.locator("button, [role=\"radio\"], [role=\"option\"], [role=\"menuitemradio\"], [role=\"button\"], label, div, span");
     const count = await locator.count().catch(() => 0);
+    const optionHits = (value: string) =>
+      ["instant", "thinking", "pro", "最新", "配置", "configure"].filter((token) =>
+        value.toLowerCase().includes(token.toLowerCase()),
+      ).length;
+    const matches: Array<{ index: number; text: string }> = [];
+
     for (let index = 0; index < count; index += 1) {
       const candidate = locator.nth(index);
       const isVisible = await candidate.isVisible().catch(() => false);
@@ -467,12 +473,24 @@ export class ChatGPTWebClientBrowser {
         continue;
       }
       const text = ((await candidate.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
-      if (!text || text.length > 220 || !regexes.some((rx) => rx.test(text))) {
+      if (
+        !text ||
+        text.length > 220 ||
+        optionHits(text) > 1 ||
+        (text.includes("5.3") && text.includes("5.5")) ||
+        !regexes.some((rx) => rx.test(text))
+      ) {
         continue;
       }
+      matches.push({ index, text });
+    }
+
+    matches.sort((left, right) => left.text.length - right.text.length);
+    for (const match of matches) {
+      const candidate = locator.nth(match.index);
       try {
         await candidate.click({ force: true, timeout: 2000 });
-        console.log(`[ChatGPT Web Browser] Clicked dialog option: ${text}`);
+        console.log(`[ChatGPT Web Browser] Clicked dialog option: ${match.text}`);
         return true;
       } catch {
         // Keep scanning for the actual interactive wrapper.
