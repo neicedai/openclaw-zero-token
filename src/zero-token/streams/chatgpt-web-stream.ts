@@ -14,6 +14,13 @@ import { stripInboundMeta } from "./strip-inbound-meta.js";
 const conversationMap = new Map<string, string>();
 const parentMessageMap = new Map<string, string>();
 
+export function resolveChatGPTWebSessionKey(context: {
+  sessionId?: string;
+  sessionKey?: string;
+}): string {
+  return context.sessionKey || context.sessionId || "default";
+}
+
 export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
   let options: string | ChatGPTWebClientOptions;
   try {
@@ -35,7 +42,8 @@ export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
       try {
         await client.init();
 
-        const sessionKey = (context as unknown as { sessionId?: string }).sessionId || "default";
+        const sessionRef = context as unknown as { sessionId?: string; sessionKey?: string };
+        const sessionKey = resolveChatGPTWebSessionKey(sessionRef);
         let conversationId = conversationMap.get(sessionKey);
         let parentMessageId = parentMessageMap.get(sessionKey);
 
@@ -67,7 +75,10 @@ export function createChatGPTWebStreamFn(cookieOrJson: string): StreamFn {
           throw new Error("No message content to send after stripping metadata");
         }
 
-        console.log(`[ChatGPTWebStream] Starting run for session: ${sessionKey}`);
+        console.log(
+          `[ChatGPTWebStream] Starting run for session: ${sessionKey} ` +
+            `(sessionId=${sessionRef.sessionId || "n/a"})`,
+        );
         console.log(`[ChatGPTWebStream] Conversation ID: ${conversationId || "new"}`);
         console.log(`[ChatGPTWebStream] prompt length: ${cleanPrompt.length}`);
 

@@ -308,12 +308,20 @@ export class ChatGPTWebClientBrowser {
     model?: string;
     signal?: AbortSignal;
   }): Promise<ReadableStream<Uint8Array>> {
-    const { page } = await this.ensureBrowser();
+    let { page } = await this.ensureBrowser();
 
     const conversationId = params.conversationId || randomUUID();
     const parentMessageId = params.parentMessageId || randomUUID();
     const messageId = randomUUID();
     const requestedModel = this.resolveRequestedModel(params.model);
+    const forceNewConversation = conversationId === "new";
+
+    if (forceNewConversation) {
+      console.log(
+        "[ChatGPT Web Browser] New session requested, opening a fresh chat page before send",
+      );
+      page = await this.openFreshChatPage();
+    }
 
     console.log(`[ChatGPT Web Browser] Sending message`);
     console.log(`[ChatGPT Web Browser] Conversation ID: ${conversationId}`);
@@ -344,7 +352,7 @@ export class ChatGPTWebClientBrowser {
       force_use_sse: true,
     };
 
-    const pageUrl = page.url();
+    const pageUrl = forceNewConversation ? "https://chatgpt.com/" : page.url();
 
     const responseData = await page.evaluate(
       async ({ body, pageUrl }) => {
