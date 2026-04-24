@@ -221,9 +221,10 @@ export class ChatGPTWebClientBrowser {
         return (
           style.visibility !== "hidden" &&
           style.display !== "none" &&
+          style.opacity !== "0" &&
+          style.pointerEvents !== "none" &&
           rect.width > 0 &&
-          rect.height > 0 &&
-          node.offsetParent !== null
+          rect.height > 0
         );
       };
 
@@ -270,9 +271,10 @@ export class ChatGPTWebClientBrowser {
         return (
           style.visibility !== "hidden" &&
           style.display !== "none" &&
+          style.opacity !== "0" &&
+          style.pointerEvents !== "none" &&
           rect.width > 0 &&
-          rect.height > 0 &&
-          node.offsetParent !== null
+          rect.height > 0
         );
       };
 
