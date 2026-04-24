@@ -17,6 +17,14 @@ import type { ModelDefinitionConfig } from "../../config/types.models.js";
 
 const CHATGPT_WEB_MODEL_ID = "gpt-5.5";
 const CHATGPT_WEB_LEGACY_MODEL_ALIASES = new Set(["gpt-4"]);
+const CHATGPT_WEB_PICKER_LABEL_PATTERNS = [
+  "instant",
+  "thinking",
+  "pro",
+  "configure",
+  "5.3",
+  "5.5",
+] as const;
 
 export interface ChatGPTWebClientOptions {
   accessToken: string;
@@ -202,6 +210,157 @@ export class ChatGPTWebClientBrowser {
     return freshPage;
   }
 
+  private async readVisibleModelPickerTexts(page: Page) {
+    return await page.evaluate((patterns) => {
+      const labels = patterns.map((p) => new RegExp(p, "i"));
+      const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const isVisible = (el: Element) => {
+        const node = el as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          node.offsetParent !== null
+        );
+      };
+
+      const seen = new Set<string>();
+      const out: string[] = [];
+      const nodes = Array.from(
+        document.querySelectorAll('button, [role="button"], [role="menuitem"], [role="option"]'),
+      );
+      for (const el of nodes) {
+        if (!isVisible(el)) {
+          continue;
+        }
+        const text = normalize(el.textContent);
+        const aria = normalize(el.getAttribute("aria-label"));
+        const title = normalize(el.getAttribute("title"));
+        const combined = [text, aria, title].filter(Boolean).join(" | ");
+        if (!combined) {
+          continue;
+        }
+        if (!labels.some((rx) => rx.test(combined))) {
+          continue;
+        }
+        if (seen.has(combined)) {
+          continue;
+        }
+        seen.add(combined);
+        out.push(combined);
+        if (out.length >= 12) {
+          break;
+        }
+      }
+      return out;
+    }, [...CHATGPT_WEB_PICKER_LABEL_PATTERNS]);
+  }
+
+  private async clickVisibleModelControl(page: Page, patterns: string[]) {
+    return await page.evaluate((matchers) => {
+      const labels = matchers.map((p) => new RegExp(p, "i"));
+      const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const isVisible = (el: Element) => {
+        const node = el as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          node.offsetParent !== null
+        );
+      };
+
+      const nodes = Array.from(
+        document.querySelectorAll(
+          'button, [role="button"], [role="menuitem"], [role="option"], [data-radix-collection-item]',
+        ),
+      );
+      const match = nodes.find((el) => {
+        if (!isVisible(el)) {
+          return false;
+        }
+        const text = normalize(el.textContent);
+        const aria = normalize(el.getAttribute("aria-label"));
+        const title = normalize(el.getAttribute("title"));
+        const combined = [text, aria, title].filter(Boolean).join(" | ");
+        return combined && labels.some((rx) => rx.test(combined));
+      });
+      if (!match) {
+        return false;
+      }
+      (match as HTMLElement).click();
+      return true;
+    }, patterns);
+  }
+
+  private async ensureRequestedModelSelected(page: Page, requestedModel: string) {
+    if (requestedModel !== CHATGPT_WEB_MODEL_ID) {
+      return;
+    }
+
+    const before = await this.readVisibleModelPickerTexts(page);
+    console.log(
+      `[ChatGPT Web Browser] Model picker before selection: ${before.join(" || ") || "unavailable"}`,
+    );
+    if (before.some((label) => /thinking|5\.5/i.test(label))) {
+      console.log("[ChatGPT Web Browser] Model picker already indicates Thinking / 5.5");
+      return;
+    }
+
+    const opened = await this.clickVisibleModelControl(page, [
+      "^instant$",
+      "^thinking$",
+      "^pro$",
+      "^configure$",
+      "instant",
+      "thinking",
+      "pro",
+      "configure",
+      "5\\.3",
+      "5\\.5",
+    ]);
+    if (!opened) {
+      console.warn("[ChatGPT Web Browser] Could not find a visible model picker control");
+      return;
+    }
+    await page.waitForTimeout(400);
+
+    let selected = await this.clickVisibleModelControl(page, [
+      "^thinking$",
+      "gpt-?5\\.5",
+      "5\\.5",
+      "thinking",
+    ]);
+    if (!selected) {
+      const configured = await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
+      if (configured) {
+        await page.waitForTimeout(400);
+        selected = await this.clickVisibleModelControl(page, [
+          "^thinking$",
+          "gpt-?5\\.5",
+          "5\\.5",
+          "thinking",
+          "auto-switch.*thinking",
+        ]);
+      }
+    }
+
+    await page.waitForTimeout(700);
+    const after = await this.readVisibleModelPickerTexts(page);
+    console.log(
+      `[ChatGPT Web Browser] Model picker after selection: ${after.join(" || ") || "unavailable"}`,
+    );
+    if (!selected) {
+      console.warn("[ChatGPT Web Browser] No visible Thinking / 5.5 option was selected");
+    }
+  }
+
   /**
    * DOM 模拟：通过真实浏览器交互发送消息，绕过 403 风控
    * 参考：zsodur/chatgpt-api-by-browser-script 等 DOM 模拟实现
@@ -216,6 +375,7 @@ export class ChatGPTWebClientBrowser {
       console.log("[ChatGPT Web Browser] DOM fallback starting a fresh chat page");
       page = await this.openFreshChatPage();
     }
+    await this.ensureRequestedModelSelected(page, CHATGPT_WEB_MODEL_ID);
 
     // Use Playwright native APIs for reliable input (same as Gemini/Grok/Perplexity)
     const inputSelectors = [
@@ -322,6 +482,7 @@ export class ChatGPTWebClientBrowser {
       );
       page = await this.openFreshChatPage();
     }
+    await this.ensureRequestedModelSelected(page, requestedModel);
 
     console.log(`[ChatGPT Web Browser] Sending message`);
     console.log(`[ChatGPT Web Browser] Conversation ID: ${conversationId}`);
