@@ -338,7 +338,7 @@ const KNOWN_WEB_MODEL_ENTRIES: ModelCatalogEntry[] = [
   { id: "claude-sonnet-4-6", name: "Claude Sonnet", provider: "claude-web", contextWindow: 200000 },
   { id: "claude-haiku-4-6", name: "Claude Sonnet", provider: "claude-web", contextWindow: 200000 },
   // chatgpt-web
-  { id: "gpt-4", name: "ChatGPT Web", provider: "chatgpt-web", contextWindow: 128000 },
+  { id: "gpt-5.5", name: "ChatGPT Web", provider: "chatgpt-web", contextWindow: 128000 },
   // doubao-web
   { id: "doubao-seed-2.0", name: "Doubao Browser", provider: "doubao-web", contextWindow: 64000 },
   // gemini-web

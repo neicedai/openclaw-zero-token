@@ -62,7 +62,7 @@ async function addModelToWhitelist(providerId: string, modelIds: string[]): Prom
       "claude-haiku-4-6": "Claude Haiku",
     },
     "chatgpt-web": {
-      "gpt-4": "ChatGPT Web",
+      "gpt-5.5": "ChatGPT Web",
     },
     "deepseek-web": {
       "deepseek-chat": "DeepSeek V3",
@@ -276,7 +276,7 @@ export async function runOnboardWebAuth(): Promise<void> {
   // Web 模型对应的模型 ID 列表
   const providerModelIds: Record<string, string[]> = {
     "claude-web": ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-6"],
-    "chatgpt-web": ["gpt-4"],
+    "chatgpt-web": ["gpt-5.5"],
     "deepseek-web": ["deepseek-chat", "deepseek-reasoner"],
     "doubao-web": ["doubao-seed-2.0"],
     "gemini-web": ["gemini-pro", "gemini-ultra"],

@@ -17,8 +17,8 @@ export const SUPPORTED_MODELS = {
     id: "chatgpt-web",
     name: "ChatGPT",
     provider: "openai",
-    models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-    defaultModel: "gpt-4o",
+    models: ["gpt-5.5"],
+    defaultModel: "gpt-5.5",
   },
   "gemini-web": {
     id: "gemini-web",

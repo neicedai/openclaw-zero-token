@@ -17,7 +17,7 @@ export class ChatGPTAdapter extends BaseAdapter {
   readonly models = ["chatgpt"];
   readonly defaultModel = "chatgpt";
   // ChatGPT Web 实际使用的模型 ID
-  private readonly actualModelId = "gpt-4";
+  private readonly actualModelId = "gpt-5.5";
 
   private cachedCredential: string | null = null;
 

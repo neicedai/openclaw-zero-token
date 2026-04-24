@@ -42,7 +42,7 @@ const CLAUDE_WEB_DEFAULT_COST = {
 };
 
 export const CHATGPT_WEB_BASE_URL = "https://chatgpt.com";
-export const CHATGPT_WEB_DEFAULT_MODEL_ID = "gpt-4";
+export const CHATGPT_WEB_DEFAULT_MODEL_ID = "gpt-5.5";
 const CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW = 128000;
 const CHATGPT_WEB_DEFAULT_MAX_TOKENS = 4096;
 const CHATGPT_WEB_DEFAULT_COST = {
@@ -318,31 +318,13 @@ export async function buildChatGPTWebProvider(_params?: {
     api: "chatgpt-web",
     models: [
       {
-        id: "gpt-4",
-        name: "GPT-4 (Web)",
+        id: "gpt-5.5",
+        name: "GPT-5.5 (Web)",
         reasoning: false,
         input: ["text", "image"],
         cost: CHATGPT_WEB_DEFAULT_COST,
         contextWindow: CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW,
         maxTokens: CHATGPT_WEB_DEFAULT_MAX_TOKENS,
-      },
-      {
-        id: "gpt-4-turbo",
-        name: "GPT-4 Turbo (Web)",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: CHATGPT_WEB_DEFAULT_COST,
-        contextWindow: CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW,
-        maxTokens: CHATGPT_WEB_DEFAULT_MAX_TOKENS,
-      },
-      {
-        id: "gpt-3.5-turbo",
-        name: "GPT-3.5 Turbo (Web)",
-        reasoning: false,
-        input: ["text"],
-        cost: CHATGPT_WEB_DEFAULT_COST,
-        contextWindow: 16000,
-        maxTokens: 4096,
       },
     ],
   };

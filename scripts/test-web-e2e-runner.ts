@@ -44,7 +44,7 @@ const GW_LOG = "/tmp/openclaw-e2e-gateway.log";
 
 const ALL_WEB_MODELS: Record<string, string> = {
   "claude-web": "claude-sonnet-4-6",
-  "chatgpt-web": "gpt-4",
+  "chatgpt-web": "gpt-5.5",
   "deepseek-web": "deepseek-chat",
   "doubao-web": "doubao-seed-2.0",
   "qwen-web": "qwen3.5-plus",

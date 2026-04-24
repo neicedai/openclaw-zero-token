@@ -15,6 +15,9 @@ import {
 import { loadConfig } from "../../config/io.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 
+const CHATGPT_WEB_MODEL_ID = "gpt-5.5";
+const CHATGPT_WEB_LEGACY_MODEL_ALIASES = new Set(["gpt-4"]);
+
 export interface ChatGPTWebClientOptions {
   accessToken: string;
   cookie?: string;
@@ -50,6 +53,14 @@ export class ChatGPTWebClientBrowser {
       this.cookie = options.cookie || `__Secure-next-auth.session-token=${options.accessToken}`;
       this.userAgent = options.userAgent || "Mozilla/5.0";
     }
+  }
+
+  private resolveRequestedModel(model?: string) {
+    const normalized = model?.trim();
+    if (!normalized || CHATGPT_WEB_LEGACY_MODEL_ALIASES.has(normalized)) {
+      return CHATGPT_WEB_MODEL_ID;
+    }
+    return normalized;
   }
 
   private async ensureBrowser() {
@@ -288,10 +299,11 @@ export class ChatGPTWebClientBrowser {
     const conversationId = params.conversationId || randomUUID();
     const parentMessageId = params.parentMessageId || randomUUID();
     const messageId = randomUUID();
+    const requestedModel = this.resolveRequestedModel(params.model);
 
     console.log(`[ChatGPT Web Browser] Sending message`);
     console.log(`[ChatGPT Web Browser] Conversation ID: ${conversationId}`);
-    console.log(`[ChatGPT Web Browser] Model: ${params.model || "gpt-4"}`);
+    console.log(`[ChatGPT Web Browser] Model: ${requestedModel}`);
 
     const body = {
       action: "next",
@@ -306,7 +318,7 @@ export class ChatGPTWebClientBrowser {
         },
       ],
       parent_message_id: parentMessageId,
-      model: params.model || "gpt-4",
+      model: requestedModel,
       timezone_offset_min: new Date().getTimezoneOffset(),
       conversation_id: conversationId === "new" ? undefined : conversationId,
       history_and_training_disabled: false,
@@ -506,8 +518,8 @@ export class ChatGPTWebClientBrowser {
   async discoverModels(): Promise<ModelDefinitionConfig[]> {
     return [
       {
-        id: "gpt-4",
-        name: "GPT-4",
+        id: CHATGPT_WEB_MODEL_ID,
+        name: "GPT-5.5",
         api: "chatgpt-web",
         reasoning: false,
         input: ["text", "image"],
