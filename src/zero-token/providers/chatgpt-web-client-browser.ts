@@ -902,6 +902,14 @@ export class ChatGPTWebClientBrowser {
     console.log(
       `[ChatGPT Web Browser] SSE sample:\n${sample}${(responseData.data?.length ?? 0) > 1800 ? "\n...(truncated)" : ""}`,
     );
+    const modelHints = Array.from(
+      new Set(
+        Array.from((responseData.data ?? "").matchAll(/gpt-[a-z0-9._-]+/gi)).map((match) => match[0].toLowerCase()),
+      ),
+    );
+    if (modelHints.length > 0) {
+      console.log(`[ChatGPT Web Browser] SSE model hints: ${modelHints.join(", ")}`);
+    }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
