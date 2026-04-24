@@ -909,6 +909,14 @@ export class ChatGPTWebClientBrowser {
     );
     if (modelHints.length > 0) {
       console.log(`[ChatGPT Web Browser] SSE model hints: ${modelHints.join(", ")}`);
+      const modelHintSnippets = Array.from((responseData.data ?? "").matchAll(/.{0,120}gpt-[a-z0-9._-]+.{0,120}/gi))
+        .slice(0, 8)
+        .map((match) => match[0].replace(/\s+/g, " ").trim());
+      if (modelHintSnippets.length > 0) {
+        console.log(
+          `[ChatGPT Web Browser] SSE model hint snippets: ${JSON.stringify(modelHintSnippets).slice(0, 4000)}`,
+        );
+      }
     }
 
     const encoder = new TextEncoder();
