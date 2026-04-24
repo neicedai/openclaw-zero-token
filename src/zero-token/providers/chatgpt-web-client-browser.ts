@@ -417,6 +417,71 @@ export class ChatGPTWebClientBrowser {
     return false;
   }
 
+  private async readVisibleDialogTexts(page: Page) {
+    const dialog = page.getByRole("dialog").last();
+    const visible = await dialog.isVisible().catch(() => false);
+    if (!visible) {
+      return [];
+    }
+
+    const locator = dialog.locator("button, [role], input, label, div, span");
+    const count = await locator.count().catch(() => 0);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      const isVisible = await candidate.isVisible().catch(() => false);
+      if (!isVisible) {
+        continue;
+      }
+      const text = ((await candidate.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 220 || seen.has(text)) {
+        continue;
+      }
+      if (!/5\.3|5\.5|thinking|instant|pro|思考|模型|最新|进阶/i.test(text)) {
+        continue;
+      }
+      seen.add(text);
+      out.push(text);
+      if (out.length >= 30) {
+        break;
+      }
+    }
+    return out;
+  }
+
+  private async clickVisibleDialogOption(page: Page, patterns: string[]) {
+    const regexes = patterns.map((pattern) => new RegExp(pattern, "i"));
+    const dialog = page.getByRole("dialog").last();
+    const visible = await dialog.isVisible().catch(() => false);
+    if (!visible) {
+      return false;
+    }
+
+    const locator = dialog.locator("button, [role=\"radio\"], [role=\"option\"], [role=\"menuitemradio\"], [role=\"button\"], label, div, span");
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      const isVisible = await candidate.isVisible().catch(() => false);
+      if (!isVisible) {
+        continue;
+      }
+      const text = ((await candidate.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 220 || !regexes.some((rx) => rx.test(text))) {
+        continue;
+      }
+      try {
+        await candidate.click({ force: true, timeout: 2000 });
+        console.log(`[ChatGPT Web Browser] Clicked dialog option: ${text}`);
+        return true;
+      } catch {
+        // Keep scanning for the actual interactive wrapper.
+      }
+    }
+
+    return false;
+  }
+
   private async ensureRequestedModelSelected(page: Page, requestedModel: string) {
     if (requestedModel !== CHATGPT_WEB_MODEL_ID) {
       return;
@@ -426,8 +491,8 @@ export class ChatGPTWebClientBrowser {
     console.log(
       `[ChatGPT Web Browser] Model picker before selection: ${before.join(" || ") || "unavailable"}`,
     );
-    if (before.some((label) => /thinking|5\.5/i.test(label))) {
-      console.log("[ChatGPT Web Browser] Model picker already indicates Thinking / 5.5");
+    if (before.some((label) => /5\.5/i.test(label))) {
+      console.log("[ChatGPT Web Browser] Model picker already indicates 5.5");
       return;
     }
 
@@ -454,38 +519,42 @@ export class ChatGPTWebClientBrowser {
     }
     await page.waitForTimeout(400);
 
-    let selected = await this.clickVisibleTextOption(page, [
-      "^thinking$",
-      "gpt-?5\\.5",
-      "5\\.5",
-      "thinking",
+    let selected = false;
+    const configured = await this.clickVisibleTextOption(page, [
+      "^配置…?$",
+      "^configure$",
+      "^configure…?$",
+      "thinking.*5\\.5",
+      "5\\.5.*thinking",
+      "配置",
+      "configure",
     ]);
+    const configuredViaText = configured
+      ? true
+      : await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
+    if (configured || configuredViaText) {
+      await page.waitForTimeout(500);
+      const dialogTexts = await this.readVisibleDialogTexts(page);
+      console.log(
+        `[ChatGPT Web Browser] Config dialog options: ${dialogTexts.join(" || ") || "unavailable"}`,
+      );
+      selected = await this.clickVisibleDialogOption(page, [
+        "^thinking\\s*5\\.5$",
+        "thinking.*5\\.5",
+        "5\\.5.*thinking",
+      ]);
+    }
+
     if (!selected) {
-      selected = await this.clickVisibleModelControl(page, ["^thinking$", "thinking", "5\\.5"]);
+      selected = await this.clickVisibleTextOption(page, [
+        "^thinking$",
+        "gpt-?5\\.5",
+        "5\\.5",
+        "thinking",
+      ]);
     }
     if (!selected) {
-      const configured = await this.clickVisibleTextOption(page, ["^配置", "^配置\\.\\.\\.$", "配置", "configure"]);
-      const configuredViaText = configured
-        ? true
-        : await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
-      if (configured || configuredViaText) {
-        await page.waitForTimeout(400);
-        selected = await this.clickVisibleTextOption(page, [
-          "^thinking$",
-          "gpt-?5\\.5",
-          "5\\.5",
-          "thinking",
-          "auto-switch.*thinking",
-        ]);
-        if (!selected) {
-          selected = await this.clickVisibleModelControl(page, [
-            "^thinking$",
-            "thinking",
-            "5\\.5",
-            "自动切换.*thinking",
-          ]);
-        }
-      }
+      selected = await this.clickVisibleModelControl(page, ["^thinking$", "thinking", "5\\.5"]);
     }
 
     await page.waitForTimeout(700);
