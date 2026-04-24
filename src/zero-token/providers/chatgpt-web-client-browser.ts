@@ -271,6 +271,10 @@ export class ChatGPTWebClientBrowser {
     return await page.evaluate(({ matchers, selector }) => {
       const labels = matchers.map((p) => new RegExp(p, "i"));
       const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const menuOptionHits = (value: string) =>
+        ["instant", "thinking", "pro", "configure", "配置"].filter((token) =>
+          value.toLowerCase().includes(token.toLowerCase()),
+        ).length;
       const isVisible = (el: Element) => {
         const node = el as HTMLElement;
         const style = window.getComputedStyle(node);
@@ -295,6 +299,9 @@ export class ChatGPTWebClientBrowser {
         const title = normalize(el.getAttribute("title"));
         const dataState = normalize(el.getAttribute("data-state"));
         const combined = [text, aria, title, dataState].filter(Boolean).join(" | ");
+        if (!combined || combined.length > 120 || menuOptionHits(combined) > 1) {
+          return false;
+        }
         return combined && labels.some((rx) => rx.test(combined));
       });
       if (!match) {
@@ -383,6 +390,10 @@ export class ChatGPTWebClientBrowser {
     const regexes = patterns.map((pattern) => new RegExp(pattern, "i"));
     const locator = page.locator("button, [role=\"menuitem\"], [role=\"option\"], [role=\"button\"], li, div, span, a");
     const count = await locator.count().catch(() => 0);
+    const menuOptionHits = (value: string) =>
+      ["instant", "thinking", "pro", "configure", "配置"].filter((token) =>
+        value.toLowerCase().includes(token.toLowerCase()),
+      ).length;
 
     for (let index = 0; index < count; index += 1) {
       const candidate = locator.nth(index);
@@ -391,7 +402,7 @@ export class ChatGPTWebClientBrowser {
         continue;
       }
       const text = ((await candidate.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
-      if (!text || text.length > 120 || !regexes.some((rx) => rx.test(text))) {
+      if (!text || text.length > 120 || menuOptionHits(text) > 1 || !regexes.some((rx) => rx.test(text))) {
         continue;
       }
       try {
@@ -443,23 +454,23 @@ export class ChatGPTWebClientBrowser {
     }
     await page.waitForTimeout(400);
 
-    let selected = await this.clickVisibleModelControl(page, [
+    let selected = await this.clickVisibleTextOption(page, [
       "^thinking$",
       "gpt-?5\\.5",
       "5\\.5",
       "thinking",
     ]);
     if (!selected) {
-      selected = await this.clickVisibleTextOption(page, ["^thinking$", "thinking", "5\\.5"]);
+      selected = await this.clickVisibleModelControl(page, ["^thinking$", "thinking", "5\\.5"]);
     }
     if (!selected) {
-      const configured = await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
+      const configured = await this.clickVisibleTextOption(page, ["^配置", "^配置\\.\\.\\.$", "配置", "configure"]);
       const configuredViaText = configured
         ? true
-        : await this.clickVisibleTextOption(page, ["^配置", "^配置\\.\\.\\.$", "配置", "configure"]);
+        : await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
       if (configured || configuredViaText) {
         await page.waitForTimeout(400);
-        selected = await this.clickVisibleModelControl(page, [
+        selected = await this.clickVisibleTextOption(page, [
           "^thinking$",
           "gpt-?5\\.5",
           "5\\.5",
@@ -467,7 +478,7 @@ export class ChatGPTWebClientBrowser {
           "auto-switch.*thinking",
         ]);
         if (!selected) {
-          selected = await this.clickVisibleTextOption(page, [
+          selected = await this.clickVisibleModelControl(page, [
             "^thinking$",
             "thinking",
             "5\\.5",
