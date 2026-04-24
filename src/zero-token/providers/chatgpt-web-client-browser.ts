@@ -345,6 +345,118 @@ export class ChatGPTWebClientBrowser {
     }, CHATGPT_WEB_INTERACTIVE_SELECTOR);
   }
 
+  private async clickTopBarModelDropdown(page: Page) {
+    return await page.evaluate(() => {
+      const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const isVisible = (el: Element) => {
+        const node = el as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          style.opacity !== "0" &&
+          style.pointerEvents !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      const all = Array.from(document.querySelectorAll("button, div, span, a, h1, h2, h3"));
+      const candidate = all.find((el) => {
+        if (!isVisible(el)) {
+          return false;
+        }
+        const text = normalize(el.textContent);
+        const rect = (el as HTMLElement).getBoundingClientRect();
+        return text === "ChatGPT" && rect.top <= 160 && rect.left >= 70 && rect.left <= 420;
+      });
+      if (!candidate) {
+        return false;
+      }
+
+      let clickable: HTMLElement | null = candidate as HTMLElement;
+      for (let depth = 0; depth < 4 && clickable; depth += 1) {
+        const rect = clickable.getBoundingClientRect();
+        const style = window.getComputedStyle(clickable);
+        const ariaExpanded = clickable.getAttribute("aria-expanded");
+        if (
+          rect.width >= 40 &&
+          rect.height >= 24 &&
+          (style.cursor === "pointer" ||
+            clickable.tagName === "BUTTON" ||
+            clickable.getAttribute("role") === "button" ||
+            ariaExpanded !== null)
+        ) {
+          clickable.click();
+          return true;
+        }
+        clickable = clickable.parentElement;
+      }
+
+      (candidate as HTMLElement).click();
+      return true;
+    });
+  }
+
+  private async clickVisibleTextOption(page: Page, patterns: string[]) {
+    return await page.evaluate((matchers) => {
+      const labels = matchers.map((p) => new RegExp(p, "i"));
+      const normalize = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() ?? "";
+      const isVisible = (el: Element) => {
+        const node = el as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          style.opacity !== "0" &&
+          style.pointerEvents !== "none" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
+      const nodes = Array.from(document.querySelectorAll("button, div, span, a, li"));
+      const match = nodes.find((el) => {
+        if (!isVisible(el)) {
+          return false;
+        }
+        const text = normalize(el.textContent);
+        if (!text || text.length > 120) {
+          return false;
+        }
+        return labels.some((rx) => rx.test(text));
+      });
+      if (!match) {
+        return false;
+      }
+
+      let clickable: HTMLElement | null = match as HTMLElement;
+      for (let depth = 0; depth < 4 && clickable; depth += 1) {
+        const rect = clickable.getBoundingClientRect();
+        const style = window.getComputedStyle(clickable);
+        if (
+          rect.width >= 40 &&
+          rect.height >= 20 &&
+          (style.cursor === "pointer" ||
+            clickable.tagName === "BUTTON" ||
+            clickable.tagName === "A" ||
+            clickable.getAttribute("role") === "menuitem" ||
+            clickable.getAttribute("role") === "option" ||
+            clickable.getAttribute("role") === "button")
+        ) {
+          clickable.click();
+          return true;
+        }
+        clickable = clickable.parentElement;
+      }
+
+      (match as HTMLElement).click();
+      return true;
+    }, patterns);
+  }
+
   private async ensureRequestedModelSelected(page: Page, requestedModel: string) {
     if (requestedModel !== CHATGPT_WEB_MODEL_ID) {
       return;
@@ -371,7 +483,8 @@ export class ChatGPTWebClientBrowser {
       "5\\.3",
       "5\\.5",
     ]);
-    if (!opened) {
+    const openedViaHeader = opened ? false : await this.clickTopBarModelDropdown(page);
+    if (!opened && !openedViaHeader) {
       const visible = await this.dumpVisibleInteractiveElements(page);
       console.warn(
         `[ChatGPT Web Browser] Visible interactive elements snapshot: ${JSON.stringify(visible).slice(0, 4000)}`,
@@ -388,8 +501,14 @@ export class ChatGPTWebClientBrowser {
       "thinking",
     ]);
     if (!selected) {
+      selected = await this.clickVisibleTextOption(page, ["^thinking$", "thinking", "5\\.5"]);
+    }
+    if (!selected) {
       const configured = await this.clickVisibleModelControl(page, ["^configure$", "configure"]);
-      if (configured) {
+      const configuredViaText = configured
+        ? true
+        : await this.clickVisibleTextOption(page, ["^配置", "^配置\\.\\.\\.$", "配置", "configure"]);
+      if (configured || configuredViaText) {
         await page.waitForTimeout(400);
         selected = await this.clickVisibleModelControl(page, [
           "^thinking$",
@@ -398,6 +517,14 @@ export class ChatGPTWebClientBrowser {
           "thinking",
           "auto-switch.*thinking",
         ]);
+        if (!selected) {
+          selected = await this.clickVisibleTextOption(page, [
+            "^thinking$",
+            "thinking",
+            "5\\.5",
+            "自动切换.*thinking",
+          ]);
+        }
       }
     }
 
