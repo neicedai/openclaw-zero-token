@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { normalizeDeepseekWebModelTypeToken } from "../../infra/gateway-request-context.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 
 export interface DeepSeekPowChallenge {
@@ -25,6 +26,12 @@ export interface DeepSeekWebClientOptions {
   cookie: string;
   bearer?: string;
   userAgent?: string;
+  /**
+   * DeepSeek Web `model_type` sent with `/api/v0/chat/completion` (e.g. `default`, `expert`, `fast`).
+   * Can also be set via env `OPENCLAW_DEEPSEEK_WEB_MODEL_TYPE` or per-request header
+   * `x-openclaw-deepseek-web-model-type` (gateway) / stream options override.
+   */
+  modelType?: string;
 }
 
 interface DeepSeekWasmExports extends WebAssembly.Exports {
@@ -61,6 +68,7 @@ export class DeepSeekWebClient {
   private cookie: string;
   private bearer: string;
   private userAgent: string;
+  private readonly defaultModelType: string;
   private deviceId: string = "";
 
   constructor(options: DeepSeekWebClientOptions | string) {
@@ -83,6 +91,10 @@ export class DeepSeekWebClient {
     this.userAgent =
       finalOptions.userAgent ||
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    this.defaultModelType =
+      normalizeDeepseekWebModelTypeToken((finalOptions as DeepSeekWebClientOptions).modelType) ??
+      normalizeDeepseekWebModelTypeToken(process.env.OPENCLAW_DEEPSEEK_WEB_MODEL_TYPE) ??
+      "expert";
   }
 
   private async fetchHeaders() {
@@ -278,11 +290,38 @@ export class DeepSeekWebClient {
     model?: string;
     fileIds?: string[];
     searchEnabled?: boolean;
+    /** DeepSeek Web `model_type` for this completion (falls back to client/env default). */
+    modelType?: string;
+    /** When set, overrides model-based default. DeepSeek Web uses this for the “深度思考” API flag. */
+    thinkingEnabled?: boolean;
     preempt?: boolean;
     parentMessageId?: string | number | null;
     signal?: AbortSignal;
   }) {
     const targetPath = "/api/v0/chat/completion";
+    const normalizedModel = params.model || "";
+    // Only R1 / reasoner id enables chain-of-thought on the wire. Avoid matching arbitrary
+    // substrings like "reasoning" in unrelated model aliases (breaks “急速 / 无思考” setups).
+    const defaultThinking =
+      normalizedModel.includes("deepseek-reasoner") ||
+      /(^|[/])deepseek-r1\b/i.test(normalizedModel);
+    const thinkingEnabled =
+      typeof params.thinkingEnabled === "boolean" ? params.thinkingEnabled : defaultThinking;
+    const searchEnabled =
+      params.searchEnabled ??
+      (normalizedModel.endsWith("-search") || normalizedModel.includes("-search"));
+    const modelType =
+      normalizeDeepseekWebModelTypeToken(params.modelType) ?? this.defaultModelType;
+    const requestBody = {
+      chat_session_id: params.sessionId,
+      parent_message_id: params.parentMessageId ?? null,
+      model_type: modelType,
+      prompt: params.message,
+      ref_file_ids: params.fileIds || [],
+      thinking_enabled: thinkingEnabled,
+      search_enabled: searchEnabled,
+      preempt: params.preempt ?? false,
+    };
     const challenge = await this.createPowChallenge(targetPath);
     const answer = await this.solvePow(challenge);
     const powResponse = Buffer.from(
@@ -296,23 +335,20 @@ export class DeepSeekWebClient {
     console.log(
       `[DeepSeekWebClient] Sending chat completion request (session: ${params.sessionId})...`,
     );
+    console.log(`[DeepSeekWebClient] Request flags:`, {
+      model: normalizedModel,
+      model_type: requestBody.model_type,
+      thinking_enabled: requestBody.thinking_enabled,
+      search_enabled: requestBody.search_enabled,
+      preempt: requestBody.preempt,
+    });
     const res = await fetch(`https://chat.deepseek.com${targetPath}`, {
       method: "POST",
       headers: {
         ...(await this.fetchHeaders()),
         "x-ds-pow-response": powResponse,
       },
-      body: JSON.stringify({
-        chat_session_id: params.sessionId,
-        parent_message_id: params.parentMessageId ?? null,
-        prompt: params.message,
-        ref_file_ids: params.fileIds || [],
-        thinking_enabled: !(
-          params.model === "deepseek-chat" && !params.model?.includes("reasoning")
-        ), // Default to true unless specifically chat-only
-        search_enabled: params.searchEnabled ?? true,
-        preempt: params.preempt ?? false,
-      }),
+      body: JSON.stringify(requestBody),
       signal: params.signal,
     });
 

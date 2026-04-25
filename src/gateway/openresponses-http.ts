@@ -14,6 +14,10 @@ import { createDefaultDeps } from "../cli/deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
 import type { GatewayHttpResponsesConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
+import {
+  normalizeDeepseekWebModelTypeToken,
+  runWithGatewayRequestContext,
+} from "../infra/gateway-request-context.js";
 import { logWarn } from "../logger.js";
 import { renderFileContextBlock } from "../media/file-context.js";
 import {
@@ -406,6 +410,7 @@ function createFunctionCallOutputItem(params: {
 }
 
 async function runResponsesAgentCommand(params: {
+  req: IncomingMessage;
   message: string;
   images: ImageContent[];
   clientTools: ClientToolDefinition[];
@@ -417,25 +422,32 @@ async function runResponsesAgentCommand(params: {
   messageChannel: string;
   deps: ReturnType<typeof createDefaultDeps>;
 }) {
-  return agentCommandFromIngress(
-    {
-      message: params.message,
-      images: params.images.length > 0 ? params.images : undefined,
-      clientTools: params.clientTools.length > 0 ? params.clientTools : undefined,
-      extraSystemPrompt: params.extraSystemPrompt || undefined,
-      model: params.modelOverride,
-      streamParams: params.streamParams ?? undefined,
-      sessionKey: params.sessionKey,
-      runId: params.runId,
-      deliver: false,
-      messageChannel: params.messageChannel,
-      bestEffortDeliver: false,
-      // HTTP API callers are authenticated operator clients for this gateway context.
-      senderIsOwner: true,
-      allowModelOverride: true,
-    },
-    defaultRuntime,
-    params.deps,
+  const deepseekWebModelType = normalizeDeepseekWebModelTypeToken(
+    getHeader(params.req, "x-openclaw-deepseek-web-model-type"),
+  );
+  return runWithGatewayRequestContext(
+    { deepseekWebModelType },
+    () =>
+      agentCommandFromIngress(
+        {
+          message: params.message,
+          images: params.images.length > 0 ? params.images : undefined,
+          clientTools: params.clientTools.length > 0 ? params.clientTools : undefined,
+          extraSystemPrompt: params.extraSystemPrompt || undefined,
+          model: params.modelOverride,
+          streamParams: params.streamParams ?? undefined,
+          sessionKey: params.sessionKey,
+          runId: params.runId,
+          deliver: false,
+          messageChannel: params.messageChannel,
+          bestEffortDeliver: false,
+          // HTTP API callers are authenticated operator clients for this gateway context.
+          senderIsOwner: true,
+          allowModelOverride: true,
+        },
+        defaultRuntime,
+        params.deps,
+      ),
   );
 }
 
@@ -686,6 +698,7 @@ export async function handleOpenResponsesHttpRequest(
   if (!stream) {
     try {
       const result = await runResponsesAgentCommand({
+        req,
         message: prompt.message,
         images,
         clientTools: resolvedClientTools,
@@ -938,6 +951,7 @@ export async function handleOpenResponsesHttpRequest(
   void (async () => {
     try {
       const result = await runResponsesAgentCommand({
+        req,
         message: prompt.message,
         images,
         clientTools: resolvedClientTools,

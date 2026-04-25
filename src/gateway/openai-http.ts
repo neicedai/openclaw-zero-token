@@ -5,6 +5,10 @@ import { createDefaultDeps } from "../cli/deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
 import type { GatewayHttpChatCompletionsConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
+import {
+  normalizeDeepseekWebModelTypeToken,
+  runWithGatewayRequestContext,
+} from "../infra/gateway-request-context.js";
 import { logWarn } from "../logger.js";
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import {
@@ -27,7 +31,11 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import { sendJson, setSseHeaders, writeDone } from "./http-common.js";
 import { handleGatewayPostJsonEndpoint } from "./http-endpoint-helpers.js";
-import { resolveGatewayRequestContext, resolveOpenAiCompatModelOverride } from "./http-utils.js";
+import {
+  getHeader,
+  resolveGatewayRequestContext,
+  resolveOpenAiCompatModelOverride,
+} from "./http-utils.js";
 import { normalizeInputHostnameAllowlist } from "./input-allowlist.js";
 
 type OpenAiHttpOptions = {
@@ -498,9 +506,16 @@ export async function handleOpenAiHttpRequest(
     messageChannel,
   });
 
+  const deepseekWebModelType = normalizeDeepseekWebModelTypeToken(
+    getHeader(req, "x-openclaw-deepseek-web-model-type"),
+  );
+  const gatewayRequestCtx = { deepseekWebModelType };
+
   if (!stream) {
     try {
-      const result = await agentCommandFromIngress(commandInput, defaultRuntime, deps);
+      const result = await runWithGatewayRequestContext(gatewayRequestCtx, () =>
+        agentCommandFromIngress(commandInput, defaultRuntime, deps),
+      );
 
       const content = resolveAgentResponseText(result);
 
@@ -578,7 +593,7 @@ export async function handleOpenAiHttpRequest(
     unsubscribe();
   });
 
-  void (async () => {
+  void runWithGatewayRequestContext(gatewayRequestCtx, async () => {
     try {
       const result = await agentCommandFromIngress(commandInput, defaultRuntime, deps);
 
@@ -626,7 +641,7 @@ export async function handleOpenAiHttpRequest(
         res.end();
       }
     }
-  })();
+  });
 
   return true;
 }

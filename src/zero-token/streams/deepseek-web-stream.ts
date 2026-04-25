@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
+import { getGatewayRequestContext } from "../../infra/gateway-request-context.js";
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import {
   createAssistantMessageEventStream,
   type AssistantMessage,
   type AssistantMessageEvent,
   type TextContent,
-  type ThinkingContent,
   type ToolCall,
   type ToolResultMessage,
 } from "@mariozechner/pi-ai";
@@ -52,7 +53,9 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
       try {
         await client.init();
 
-        const sessionKey = (context as unknown as { sessionId?: string }).sessionId || "default";
+        const sessionRef = context as unknown as { sessionId?: string; sessionKey?: string };
+        const sessionKey =
+          sessionRef.sessionKey || sessionRef.sessionId || `deepseek-web:${randomUUID()}`;
         let dsSessionId = sessionMap.get(sessionKey);
         let parentId = parentMessageMap.get(sessionKey);
 
@@ -178,16 +181,32 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
         }
 
         const searchEnabled =
-          (options as unknown as { searchEnabled?: boolean })?.searchEnabled ?? true;
+          (options as unknown as { searchEnabled?: boolean })?.searchEnabled ??
+          model.id.endsWith("-search");
         const preempt = (options as unknown as { preempt?: boolean })?.preempt ?? false;
         const fileIds = (options as unknown as { fileIds?: string[] })?.fileIds || [];
+
+        // Align with Cursor / agent “急速”: pi-agent passes thinkingLevel "off" when user disables thinking.
+        // DeepSeek 网页里「专家/急速」不改变 model_type；真正对应 API 的是 thinking_enabled。
+        const thinkingLevel =
+          (options as unknown as { thinkingLevel?: string }).thinkingLevel ?? "off";
+        const modelIdLower = model.id.toLowerCase();
+        const reasonerCapable =
+          modelIdLower.includes("deepseek-reasoner") || /(^|[/])deepseek-r1\b/i.test(modelIdLower);
+        const webThinkingEnabled = thinkingLevel !== "off" && reasonerCapable;
+
+        const explicitModelType =
+          (options as unknown as { deepseekWebModelType?: string }).deepseekWebModelType?.trim() ||
+          getGatewayRequestContext()?.deepseekWebModelType;
 
         const responseStream = await client.chatCompletions({
           sessionId: dsSessionId,
           parentMessageId: parentId,
           message: prompt,
           model: model.id,
+          modelType: explicitModelType || undefined,
           searchEnabled,
+          thinkingEnabled: webThinkingEnabled,
           preempt,
           fileIds,
           signal: options?.signal,
@@ -207,7 +226,7 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
         // Sequential indexing for pi-ai AssistantMessage events
         const indexMap = new Map<string, number>();
         let nextIndex = 0;
-        const contentParts: (TextContent | ThinkingContent | ToolCall)[] = [];
+        const contentParts: (TextContent | ToolCall)[] = [];
 
         const createPartial = (): AssistantMessage => {
           const msg: AssistantMessage = {
@@ -227,8 +246,6 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
             stopReason: accumulatedToolCalls.length > 0 ? "toolUse" : "stop",
             timestamp: Date.now(),
           };
-          (msg as unknown as { thinking_enabled: boolean }).thinking_enabled =
-            !!accumulatedReasoning;
           return msg;
         };
 
@@ -247,6 +264,12 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
             return;
           }
 
+          // When agent / Cursor has thinking off, drop upstream reasoning frames entirely
+          // (DeepSeek may still emit them if the browser session had “深度思考” on).
+          if (type === "thinking" && !webThinkingEnabled) {
+            return;
+          }
+
           const key = type === "toolcall" ? `tool_${currentToolIndex}` : type;
           if (!indexMap.has(key)) {
             const index = nextIndex++;
@@ -256,12 +279,8 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
               contentParts[index] = { type: "text", text: "" };
               stream.push({ type: "text_start", contentIndex: index, partial: createPartial() });
             } else if (type === "thinking") {
-              contentParts[index] = { type: "thinking", thinking: "" };
-              stream.push({
-                type: "thinking_start",
-                contentIndex: index,
-                partial: createPartial(),
-              });
+              accumulatedReasoning += delta;
+              return;
             } else if (type === "toolcall") {
               const toolId = forceId || `call_${Date.now()}_${index}`;
               contentParts[index] = {
@@ -296,14 +315,7 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
               partial: createPartial(),
             });
           } else if (type === "thinking") {
-            (contentParts[index] as ThinkingContent).thinking += delta;
             accumulatedReasoning += delta;
-            stream.push({
-              type: "thinking_delta",
-              contentIndex: index,
-              delta,
-              partial: createPartial(),
-            });
           } else if (type === "toolcall") {
             accumulatedToolCalls[currentToolIndex].arguments += delta;
             stream.push({
@@ -673,10 +685,6 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
           if (part.type === "toolCall") {
             return !INTERNAL_TOOLS.has(part.name);
           }
-          // Filter out empty thinking/text if they are totally empty to keep final message clean
-          if (part.type === "thinking" && !part.thinking) {
-            return false;
-          }
           if (part.type === "text" && !part.text) {
             return false;
           }
@@ -700,8 +708,6 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
           },
           timestamp: Date.now(),
         };
-        (assistantMessage as unknown as { thinking_enabled: boolean }).thinking_enabled =
-          !!accumulatedReasoning;
 
         stream.push({
           type: "done",
