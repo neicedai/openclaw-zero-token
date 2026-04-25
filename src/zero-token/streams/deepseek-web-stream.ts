@@ -29,11 +29,11 @@ function stripLeakedReasoningFromText(text: string): string {
     .replace(/<\|(?:begin|end)_of_thought\|>[\s\S]*?(?=<\|end_of_thought\|>|$)/gi, "");
 
   const looksLikeLeakedReasoning = (value: string) =>
-    /^(我们|我)(?:只|先|现在)?(?:需要|应该|已经|看到|知道|理解|分析|判断|检查|确认|处理|回答|回复|遵循|根据|注意|收到|无需|不需要)|^用户(?:输入|可能|只是|想|要求|没有|需要|给出|询问)|^这个(?:问题|输入|请求)|^根据(?:系统|提示|用户|上下文)|^(没有明确|无需|所以|如果没有|直接回复)|^The user\b|^We need\b|^I need\b|^We should\b|^I should\b|^Let's\b/i.test(
+    /^(我们|我)(?:只|先|现在)?(?:需要|应该|已经|看到|知道|理解|分析|判断|检查|确认|处理|回答|回复|遵循|根据|注意|收到|无需|不需要)|^用户(?:输入|可能|只是|想|要求|没有|需要|给出|询问)|^这个(?:问题|输入|请求)|^根据(?:系统|提示|用户|上下文)|^(没有明确|无需|所以|如果没有|直接回复|回复(?:简单|即可|.*?即可))|^The user\b|^We need\b|^I need\b|^We should\b|^I should\b|^Let's\b/i.test(
       value.trimStart(),
     );
   const looksLikeFinalAnswer = (value: string) =>
-    /^(Hello|Hi|你好|您好|好的|可以|当然|OK|收到|已完成|下面|这里|请问|最终答案|答案|回复|结论|总结|#{1,3}\s+|-+\s+)/i.test(
+    /^(Hello|Hi|你好|您好|好的|可以|当然|OK|收到|已完成|下面|这里|请问|最终答案|答案[:：]|回复[:：]|结论|总结|#{1,3}\s+|-+\s+)/i.test(
       value.trimStart(),
     );
 
