@@ -7,6 +7,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type GatewayRequestContextValue = {
   /** DeepSeek Web `/api/v0/chat/completion` JSON field `model_type`. */
   deepseekWebModelType?: string;
+  /** DeepSeek Web `/api/v0/chat/completion` JSON field `thinking_enabled`. */
+  deepseekWebThinkingEnabled?: boolean;
 };
 
 const storage = new AsyncLocalStorage<GatewayRequestContextValue>();
@@ -35,4 +37,18 @@ export function normalizeDeepseekWebModelTypeToken(raw: string | undefined): str
     return undefined;
   }
   return t;
+}
+
+export function normalizeBooleanToken(raw: string | undefined): boolean | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const t = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on", "enabled", "expert"].includes(t)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "disabled", "fast"].includes(t)) {
+    return false;
+  }
+  return undefined;
 }

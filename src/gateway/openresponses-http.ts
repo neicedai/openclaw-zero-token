@@ -15,6 +15,7 @@ import { agentCommandFromIngress } from "../commands/agent.js";
 import type { GatewayHttpResponsesConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
 import {
+  normalizeBooleanToken,
   normalizeDeepseekWebModelTypeToken,
   runWithGatewayRequestContext,
 } from "../infra/gateway-request-context.js";
@@ -425,8 +426,11 @@ async function runResponsesAgentCommand(params: {
   const deepseekWebModelType = normalizeDeepseekWebModelTypeToken(
     getHeader(params.req, "x-openclaw-deepseek-web-model-type"),
   );
+  const deepseekWebThinkingEnabled = normalizeBooleanToken(
+    getHeader(params.req, "x-openclaw-deepseek-web-thinking"),
+  );
   return runWithGatewayRequestContext(
-    { deepseekWebModelType },
+    { deepseekWebModelType, deepseekWebThinkingEnabled },
     () =>
       agentCommandFromIngress(
         {

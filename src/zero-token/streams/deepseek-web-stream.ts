@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { getGatewayRequestContext } from "../../infra/gateway-request-context.js";
+import {
+  getGatewayRequestContext,
+  normalizeBooleanToken,
+} from "../../infra/gateway-request-context.js";
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import {
   createAssistantMessageEventStream,
@@ -186,18 +189,26 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
         const preempt = (options as unknown as { preempt?: boolean })?.preempt ?? false;
         const fileIds = (options as unknown as { fileIds?: string[] })?.fileIds || [];
 
-        // Align with Cursor / agent “急速”: pi-agent passes thinkingLevel "off" when user disables thinking.
         // DeepSeek 网页里「专家/急速」不改变 model_type；真正对应 API 的是 thinking_enabled。
+        // Cursor custom OpenAI models often cannot expose a thinking toggle, so default reasoner
+        // requests to expert/deep-thinking on while still suppressing reasoning frames downstream.
         const thinkingLevel =
           (options as unknown as { thinkingLevel?: string }).thinkingLevel ?? "off";
         const modelIdLower = model.id.toLowerCase();
         const reasonerCapable =
           modelIdLower.includes("deepseek-reasoner") || /(^|[/])deepseek-r1\b/i.test(modelIdLower);
-        const webThinkingEnabled = thinkingLevel !== "off" && reasonerCapable;
+        const requestContext = getGatewayRequestContext();
+        const explicitThinkingEnabled =
+          (options as unknown as { deepseekWebThinkingEnabled?: boolean })
+            .deepseekWebThinkingEnabled ?? requestContext?.deepseekWebThinkingEnabled;
+        const envThinkingEnabled = normalizeBooleanToken(process.env.OPENCLAW_DEEPSEEK_WEB_THINKING);
+        const defaultThinkingEnabled = reasonerCapable || thinkingLevel !== "off";
+        const webThinkingEnabled =
+          explicitThinkingEnabled ?? envThinkingEnabled ?? defaultThinkingEnabled;
 
         const explicitModelType =
           (options as unknown as { deepseekWebModelType?: string }).deepseekWebModelType?.trim() ||
-          getGatewayRequestContext()?.deepseekWebModelType;
+          requestContext?.deepseekWebModelType;
 
         const responseStream = await client.chatCompletions({
           sessionId: dsSessionId,

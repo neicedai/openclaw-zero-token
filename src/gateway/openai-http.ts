@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ImageContent } from "../agents/command/types.js";
 import { createDefaultDeps } from "../cli/deps.js";
@@ -6,6 +6,7 @@ import { agentCommandFromIngress } from "../commands/agent.js";
 import type { GatewayHttpChatCompletionsConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
 import {
+  normalizeBooleanToken,
   normalizeDeepseekWebModelTypeToken,
   runWithGatewayRequestContext,
 } from "../infra/gateway-request-context.js";
@@ -397,6 +398,36 @@ function buildAgentPrompt(
   };
 }
 
+function resolveOpenAiConversationSeed(messagesUnknown: unknown): string | undefined {
+  const messages = asMessages(messagesUnknown);
+  const seedParts: string[] = [];
+
+  for (const msg of messages) {
+    const role = typeof msg.role === "string" ? msg.role.trim() : "";
+    if (role === "system" || role === "developer") {
+      const content = extractTextContent(msg.content).trim();
+      if (content) {
+        seedParts.push(`${role}:${content}`);
+      }
+      continue;
+    }
+
+    if (role === "user") {
+      const content = extractTextContent(msg.content).trim();
+      const imageCount = extractImageUrls(msg.content).length;
+      if (content || imageCount > 0) {
+        seedParts.push(`user:${content || IMAGE_ONLY_USER_MESSAGE}:images=${imageCount}`);
+      }
+      break;
+    }
+  }
+
+  if (seedParts.length === 0) {
+    return undefined;
+  }
+  return createHash("sha256").update(seedParts.join("\n\n")).digest("hex").slice(0, 32);
+}
+
 function coerceRequest(val: unknown): OpenAiChatCompletionRequest {
   if (!val || typeof val !== "object") {
     return {};
@@ -442,6 +473,7 @@ export async function handleOpenAiHttpRequest(
   const stream = Boolean(payload.stream);
   const model = typeof payload.model === "string" ? payload.model : "openclaw";
   const user = typeof payload.user === "string" ? payload.user : undefined;
+  const conversationSeed = resolveOpenAiConversationSeed(payload.messages);
 
   const { agentId, sessionKey, messageChannel } = resolveGatewayRequestContext({
     req,
@@ -454,6 +486,7 @@ export async function handleOpenAiHttpRequest(
     // pinning sessions together via the OpenAI `user` field unless the caller
     // explicitly opts into reuse with `x-openclaw-session-key`.
     allowUserScopedSession: false,
+    sessionSeed: conversationSeed,
   });
   const { modelOverride, errorMessage: modelError } = await resolveOpenAiCompatModelOverride({
     req,
@@ -509,7 +542,10 @@ export async function handleOpenAiHttpRequest(
   const deepseekWebModelType = normalizeDeepseekWebModelTypeToken(
     getHeader(req, "x-openclaw-deepseek-web-model-type"),
   );
-  const gatewayRequestCtx = { deepseekWebModelType };
+  const deepseekWebThinkingEnabled = normalizeBooleanToken(
+    getHeader(req, "x-openclaw-deepseek-web-thinking"),
+  );
+  const gatewayRequestCtx = { deepseekWebModelType, deepseekWebThinkingEnabled };
 
   if (!stream) {
     try {

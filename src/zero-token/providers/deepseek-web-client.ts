@@ -94,7 +94,7 @@ export class DeepSeekWebClient {
     this.defaultModelType =
       normalizeDeepseekWebModelTypeToken((finalOptions as DeepSeekWebClientOptions).modelType) ??
       normalizeDeepseekWebModelTypeToken(process.env.OPENCLAW_DEEPSEEK_WEB_MODEL_TYPE) ??
-      "expert";
+      "default";
   }
 
   private async fetchHeaders() {
