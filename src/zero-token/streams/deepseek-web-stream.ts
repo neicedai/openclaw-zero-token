@@ -22,6 +22,51 @@ function stripForWebProvider(prompt: string): string {
   return prompt;
 }
 
+function stripLeakedReasoningFromText(text: string): string {
+  let cleaned = text
+    .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, "")
+    .replace(/<thought\b[^>]*>[\s\S]*?<\/thought>/gi, "")
+    .replace(/<\|(?:begin|end)_of_thought\|>[\s\S]*?(?=<\|end_of_thought\|>|$)/gi, "");
+
+  const trimmedStart = cleaned.trimStart();
+  const droppedWhitespace = cleaned.length - trimmedStart.length;
+  const looksLikeLeakedReasoning =
+    /^(我们|我)(收到|需要|要|先|应该|可以|来|将|会|现在|看到|知道|理解|分析|判断|检查|确认|处理|回答|回复|遵循|根据|注意)|^用户(?:输入|可能|只是|想|要求|没有)|^这个(?:问题|输入|请求)|^根据(?:系统|提示|用户|上下文)|^The user\b|^We need\b|^I need\b|^We should\b|^I should\b|^Let's\b/i.test(
+      trimmedStart,
+    );
+
+  if (!looksLikeLeakedReasoning) {
+    return cleaned;
+  }
+
+  const boundaryPatterns = [
+    /(?:^|[\n。！？!?])\s*((?:你好|您好|好的|可以|当然|OK|收到|已完成|下面|这里|请问)[，,！!。:\s])/,
+    /(?:^|[\n。！？!?])\s*((?:最终答案|答案|回复|结论|总结)[:：]\s*)/,
+    /(?:^|\n)\s*(#{1,3}\s+\S+)/,
+    /(?:^|\n)\s*(-\s+\S+)/,
+  ];
+
+  let boundary = -1;
+  let boundaryOffset = 0;
+  for (const pattern of boundaryPatterns) {
+    const match = pattern.exec(trimmedStart);
+    if (match?.index !== undefined && match.index > 0) {
+      const offset = match[0].indexOf(match[1] ?? "");
+      const candidate = match.index + Math.max(0, offset);
+      if (candidate > 20 && (boundary === -1 || candidate < boundary)) {
+        boundary = candidate;
+        boundaryOffset = droppedWhitespace;
+      }
+    }
+  }
+
+  if (boundary !== -1) {
+    cleaned = cleaned.slice(boundary + boundaryOffset).trimStart();
+  }
+
+  return cleaned;
+}
+
 // Keep track of session IDs per session key to avoid creating too many web chat sessions
 const sessionMap = new Map<string, string>();
 const parentMessageMap = new Map<string, string | number>();
@@ -188,6 +233,8 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
           model.id.endsWith("-search");
         const preempt = (options as unknown as { preempt?: boolean })?.preempt ?? false;
         const fileIds = (options as unknown as { fileIds?: string[] })?.fileIds || [];
+        let deferTextEmission = false;
+        let deferredText = "";
 
         // DeepSeek 网页里「专家/急速」不改变 model_type；真正对应 API 的是 thinking_enabled。
         // Cursor custom OpenAI models often cannot expose a thinking toggle, so default reasoner
@@ -205,15 +252,19 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
         const defaultThinkingEnabled = reasonerCapable || thinkingLevel !== "off";
         const webThinkingEnabled =
           explicitThinkingEnabled ?? envThinkingEnabled ?? defaultThinkingEnabled;
+        deferTextEmission = webThinkingEnabled;
 
         const explicitModelType =
           (options as unknown as { deepseekWebModelType?: string }).deepseekWebModelType?.trim() ||
           requestContext?.deepseekWebModelType;
+        const outboundPrompt = webThinkingEnabled
+          ? `${prompt}\n\n重要：可以在内部深度思考，但不要把推理过程、自我分析、执行计划或“我需要/我们需要”这类内容写进回复。只输出给用户看的最终答案。`
+          : prompt;
 
         const responseStream = await client.chatCompletions({
           sessionId: dsSessionId,
           parentMessageId: parentId,
-          message: prompt,
+          message: outboundPrompt,
           model: model.id,
           modelType: explicitModelType || undefined,
           searchEnabled,
@@ -281,6 +332,12 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
             return;
           }
 
+          if (type === "text" && deferTextEmission) {
+            accumulatedContent += delta;
+            deferredText += delta;
+            return;
+          }
+
           const key = type === "toolcall" ? `tool_${currentToolIndex}` : type;
           if (!indexMap.has(key)) {
             const index = nextIndex++;
@@ -335,6 +392,18 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
               delta,
               partial: createPartial(),
             });
+          }
+        };
+
+        const flushDeferredText = () => {
+          if (!deferredText) {
+            return;
+          }
+          const text = stripLeakedReasoningFromText(deferredText);
+          deferredText = "";
+          deferTextEmission = false;
+          if (text) {
+            emitDelta("text", text);
           }
         };
 
@@ -672,6 +741,7 @@ export function createDeepseekWebStreamFn(cookieOrJson: string): StreamFn {
               }
               tagBuffer = "";
             }
+            flushDeferredText();
             break;
           }
 
